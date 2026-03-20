@@ -1,10 +1,10 @@
-defmodule CoffWeb.ChatController do
-  use CoffWeb, :controller
+defmodule OllamaWrapperWeb.ChatController do
+  use OllamaWrapperWeb, :controller
 
   def create(conn, %{"message" => message} = params) do
     system = Map.get(params, "system")
 
-    case Coff.Ollama.chat(message, system) do
+    case OllamaWrapper.Ollama.chat(message, system) do
       {:ok, result} ->
         json(conn, result)
 

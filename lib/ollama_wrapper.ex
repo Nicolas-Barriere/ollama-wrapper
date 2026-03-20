@@ -1,6 +1,6 @@
-defmodule Coff do
+defmodule OllamaWrapper do
   @moduledoc """
-  Coff keeps the contexts that define your domain
+  OllamaWrapper keeps the contexts that define your domain
   and business logic.
 
   Contexts are also responsible for managing your data, regardless

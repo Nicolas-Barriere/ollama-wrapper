@@ -7,18 +7,18 @@
 # General application configuration
 import Config
 
-config :coff,
+config :ollama_wrapper,
   generators: [timestamp_type: :utc_datetime]
 
 # Configure the endpoint
-config :coff, CoffWeb.Endpoint,
+config :ollama_wrapper, OllamaWrapperWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [json: CoffWeb.ErrorJSON],
+    formats: [json: OllamaWrapperWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Coff.PubSub,
+  pubsub_server: OllamaWrapper.PubSub,
   live_view: [signing_salt: "ov5xJXzb"]
 
 # Configure Elixir's Logger

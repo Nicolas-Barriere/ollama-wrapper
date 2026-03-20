@@ -2,7 +2,7 @@ import Config
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
-config :coff, CoffWeb.Endpoint,
+config :ollama_wrapper, OllamaWrapperWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "qxlmkQC7l1XVPbTqTkfxL4nE8RBvFLIkNK++M1NhT63qZz01f8cw9TEVl+r4bv8b",
   server: false

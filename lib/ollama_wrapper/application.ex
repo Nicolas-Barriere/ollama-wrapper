@@ -1,4 +1,4 @@
-defmodule Coff.Application do
+defmodule OllamaWrapper.Application do
   # See https://hexdocs.pm/elixir/Application.html
   # for more information on OTP Applications
   @moduledoc false
@@ -8,16 +8,16 @@ defmodule Coff.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      CoffWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:coff, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Coff.PubSub},
+      OllamaWrapperWeb.Telemetry,
+      {DNSCluster, query: Application.get_env(:ollama_wrapper, :dns_cluster_query) || :ignore},
+      {Phoenix.PubSub, name: OllamaWrapper.PubSub},
       # Start to serve requests, typically the last entry
-      CoffWeb.Endpoint
+      OllamaWrapperWeb.Endpoint
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Coff.Supervisor]
+    opts = [strategy: :one_for_one, name: OllamaWrapper.Supervisor]
     Supervisor.start_link(children, opts)
   end
 
@@ -25,7 +25,7 @@ defmodule Coff.Application do
   # whenever the application is updated.
   @impl true
   def config_change(changed, _new, removed) do
-    CoffWeb.Endpoint.config_change(changed, removed)
+    OllamaWrapperWeb.Endpoint.config_change(changed, removed)
     :ok
   end
 end

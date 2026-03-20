@@ -1,12 +1,12 @@
-defmodule CoffWeb do
+defmodule OllamaWrapperWeb do
   @moduledoc """
   The entrypoint for defining your web interface, such
   as controllers, components, channels, and so on.
 
   This can be used in your application as:
 
-      use CoffWeb, :controller
-      use CoffWeb, :html
+      use OllamaWrapperWeb, :controller
+      use OllamaWrapperWeb, :html
 
   The definitions below will be executed for every controller,
   component, etc, so keep them short and clean, focused
@@ -48,9 +48,9 @@ defmodule CoffWeb do
   def verified_routes do
     quote do
       use Phoenix.VerifiedRoutes,
-        endpoint: CoffWeb.Endpoint,
-        router: CoffWeb.Router,
-        statics: CoffWeb.static_paths()
+        endpoint: OllamaWrapperWeb.Endpoint,
+        router: OllamaWrapperWeb.Router,
+        statics: OllamaWrapperWeb.static_paths()
     end
   end
 

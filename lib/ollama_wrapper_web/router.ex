@@ -1,11 +1,11 @@
-defmodule CoffWeb.Router do
-  use CoffWeb, :router
+defmodule OllamaWrapperWeb.Router do
+  use OllamaWrapperWeb, :router
 
   pipeline :api do
     plug :accepts, ["json"]
   end
 
-  scope "/api", CoffWeb do
+  scope "/api", OllamaWrapperWeb do
     pipe_through :api
 
     post "/chat", ChatController, :create

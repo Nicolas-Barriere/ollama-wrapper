@@ -3,7 +3,7 @@ import Config
 # Force using SSL in production. This also sets the "strict-security-transport" header,
 # known as HSTS. If you have a health check endpoint, you may want to exclude it below.
 # Note `:force_ssl` is required to be set at compile-time.
-config :coff, CoffWeb.Endpoint,
+config :ollama_wrapper, OllamaWrapperWeb.Endpoint,
   force_ssl: [rewrite_on: [:x_forwarded_proto]],
   exclude: [
     # paths: ["/health"],

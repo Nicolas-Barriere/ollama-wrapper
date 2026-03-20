@@ -1,4 +1,4 @@
-defmodule Coff.Ollama do
+defmodule OllamaWrapper.Ollama do
   @base_url "http://localhost:11434"
   @model "qwen3:8b"
 
