@@ -3,15 +3,21 @@ defmodule OllamaWrapperWeb.DashboardLive do
 
   alias OllamaWrapper.RequestStore
 
+  @default_filters %{search: "", status: "", model: ""}
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(OllamaWrapper.PubSub, RequestStore.topic())
     end
 
+    filters = @default_filters
+
     {:ok,
      socket
-     |> assign(:requests, RequestStore.recent())
+     |> assign(:filters, filters)
+     |> assign(:models, RequestStore.models())
+     |> assign(:requests, RequestStore.recent(50, filters))
      |> assign(:summary, RequestStore.summary())
      |> assign(:selected_id, nil)}
   end
@@ -20,8 +26,24 @@ defmodule OllamaWrapperWeb.DashboardLive do
   def handle_info({:new_request, _entry}, socket) do
     {:noreply,
      socket
-     |> assign(:requests, RequestStore.recent())
+     |> assign(:models, RequestStore.models())
+     |> assign(:requests, RequestStore.recent(50, socket.assigns.filters))
      |> assign(:summary, RequestStore.summary())}
+  end
+
+  @impl true
+  def handle_event("filter", params, socket) do
+    filters = %{
+      search: Map.get(params, "search", ""),
+      status: Map.get(params, "status", ""),
+      model: Map.get(params, "model", "")
+    }
+
+    {:noreply,
+     socket
+     |> assign(:filters, filters)
+     |> assign(:selected_id, nil)
+     |> assign(:requests, RequestStore.recent(50, filters))}
   end
 
   @impl true
@@ -63,6 +85,10 @@ defmodule OllamaWrapperWeb.DashboardLive do
         <div class="stat-value">{@summary.avg_latency_ms}ms</div>
       </div>
       <div class="stat">
+        <div class="stat-label">Avg tok/s</div>
+        <div class="stat-value">{@summary.avg_tokens_per_sec}</div>
+      </div>
+      <div class="stat">
         <div class="stat-label">Prompt Tokens</div>
         <div class="stat-value">{@summary.total_prompt_tokens}</div>
       </div>
@@ -70,11 +96,27 @@ defmodule OllamaWrapperWeb.DashboardLive do
         <div class="stat-label">Completion Tokens</div>
         <div class="stat-value">{@summary.total_completion_tokens}</div>
       </div>
-      <div class="stat">
-        <div class="stat-label">Avg tok/s</div>
-        <div class="stat-value">{@summary.avg_tokens_per_sec}</div>
-      </div>
     </div>
+
+    <form phx-change="filter" class="filters">
+      <input
+        type="text"
+        name="search"
+        value={@filters.search}
+        placeholder="Search messages and responses..."
+        class="filter-search"
+        phx-debounce="300"
+      />
+      <select name="status" class="filter-select">
+        <option value="" selected={@filters.status == ""}>All statuses</option>
+        <option value="ok" selected={@filters.status == "ok"}>OK</option>
+        <option value="error" selected={@filters.status == "error"}>Error</option>
+      </select>
+      <select name="model" class="filter-select">
+        <option value="" selected={@filters.model == ""}>All models</option>
+        <option :for={m <- @models} value={m} selected={@filters.model == m}>{m}</option>
+      </select>
+    </form>
 
     <table>
       <thead>

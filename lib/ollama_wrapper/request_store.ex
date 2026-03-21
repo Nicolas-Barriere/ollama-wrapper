@@ -14,13 +14,29 @@ defmodule OllamaWrapper.RequestStore do
     Phoenix.PubSub.broadcast(@pubsub, @topic, {:new_request, attrs})
   end
 
-  def recent(limit \\ 50) do
-    Repo.all(
-      from e in RequestEvent,
-        order_by: [desc: e.timestamp],
-        limit: ^limit
-    )
+  def recent(limit \\ 50, filters \\ %{}) do
+    from(e in RequestEvent, order_by: [desc: e.timestamp], limit: ^limit)
+    |> apply_filter(:search, Map.get(filters, :search))
+    |> apply_filter(:status, Map.get(filters, :status))
+    |> apply_filter(:model, Map.get(filters, :model))
+    |> Repo.all()
   end
+
+  def models do
+    Repo.all(from e in RequestEvent, select: e.model, distinct: true, order_by: e.model)
+  end
+
+  defp apply_filter(query, :search, term) when is_binary(term) and term != "" do
+    pattern = "%#{term}%"
+    where(query, [e], ilike(e.message, ^pattern) or ilike(e.response, ^pattern))
+  end
+
+  defp apply_filter(query, :status, "ok"), do: where(query, [e], e.status == :ok)
+  defp apply_filter(query, :status, "error"), do: where(query, [e], e.status == :error)
+  defp apply_filter(query, :model, model) when is_binary(model) and model != "",
+    do: where(query, [e], e.model == ^model)
+
+  defp apply_filter(query, _key, _val), do: query
 
   def summary do
     total = Repo.aggregate(RequestEvent, :count, :id)

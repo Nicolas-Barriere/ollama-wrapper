@@ -24,6 +24,11 @@ defmodule OllamaWrapperWeb.Layouts do
         .ok { color: #3fb950; }
         .error { color: #f85149; }
         .muted { color: #8b949e; }
+        .filters { display: flex; gap: 12px; margin-bottom: 16px; }
+        .filter-search { flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; color: #c9d1d9; font-size: 0.875rem; outline: none; }
+        .filter-search:focus { border-color: #58a6ff; }
+        .filter-select { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; color: #c9d1d9; font-size: 0.875rem; outline: none; cursor: pointer; }
+        .filter-select:focus { border-color: #58a6ff; }
         tr.selected td { background: #1c2128; }
         tr:hover td { background: #1c2128; }
         .detail-panel { margin-top: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; }
