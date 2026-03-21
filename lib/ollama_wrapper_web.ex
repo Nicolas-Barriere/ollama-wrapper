@@ -35,6 +35,28 @@ defmodule OllamaWrapperWeb do
     end
   end
 
+  def live_view do
+    quote do
+      use Phoenix.LiveView,
+        layout: {OllamaWrapperWeb.Layouts, :app}
+
+      import Phoenix.HTML
+
+      unquote(verified_routes())
+    end
+  end
+
+  def html do
+    quote do
+      use Phoenix.Component
+
+      import Phoenix.HTML
+      import Phoenix.Controller, only: [get_csrf_token: 0]
+
+      unquote(verified_routes())
+    end
+  end
+
   def controller do
     quote do
       use Phoenix.Controller, formats: [:html, :json]

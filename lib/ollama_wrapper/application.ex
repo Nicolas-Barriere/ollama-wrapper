@@ -11,7 +11,7 @@ defmodule OllamaWrapper.Application do
       OllamaWrapperWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:ollama_wrapper, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: OllamaWrapper.PubSub},
-      # Start to serve requests, typically the last entry
+      OllamaWrapper.RequestStore,
       OllamaWrapperWeb.Endpoint
     ]
 
