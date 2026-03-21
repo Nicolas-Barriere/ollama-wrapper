@@ -35,6 +35,11 @@ defmodule OllamaWrapperWeb.DashboardLive do
     Enum.find(requests, &(&1.id == id))
   end
 
+  defp tokens_per_sec(req) do
+    gen_ms = (req.thinking_duration_ms || 0) + (req.output_duration_ms || 0)
+    if gen_ms > 0, do: Float.round(req.completion_tokens / (gen_ms / 1000), 1), else: nil
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -65,6 +70,10 @@ defmodule OllamaWrapperWeb.DashboardLive do
         <div class="stat-label">Completion Tokens</div>
         <div class="stat-value">{@summary.total_completion_tokens}</div>
       </div>
+      <div class="stat">
+        <div class="stat-label">Avg tok/s</div>
+        <div class="stat-value">{@summary.avg_tokens_per_sec}</div>
+      </div>
     </div>
 
     <table>
@@ -78,6 +87,7 @@ defmodule OllamaWrapperWeb.DashboardLive do
           <th>Output</th>
           <th>In</th>
           <th>Out</th>
+          <th>tok/s</th>
           <th>Message</th>
         </tr>
       </thead>
@@ -97,6 +107,7 @@ defmodule OllamaWrapperWeb.DashboardLive do
           <td class="muted">{req.output_duration_ms}ms</td>
           <td>{req.prompt_tokens}</td>
           <td>{req.completion_tokens}</td>
+          <td>{tokens_per_sec(req)}</td>
           <td class="muted">{String.slice(req.message || "", 0, 100)}</td>
         </tr>
       </tbody>
