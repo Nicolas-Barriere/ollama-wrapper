@@ -1,82 +1,58 @@
 defmodule OllamaWrapper.RequestStore do
-  use GenServer
+  import Ecto.Query
 
-  @max_entries 1000
-  @table :request_store
+  alias OllamaWrapper.{Repo, RequestEvent}
+
   @pubsub OllamaWrapper.PubSub
   @topic "request_metrics"
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, [], name: __MODULE__)
-  end
+  def record(attrs) do
+    %RequestEvent{}
+    |> RequestEvent.changeset(attrs)
+    |> Repo.insert!()
 
-  def record(entry) do
-    GenServer.cast(__MODULE__, {:record, entry})
+    Phoenix.PubSub.broadcast(@pubsub, @topic, {:new_request, attrs})
   end
 
   def recent(limit \\ 50) do
-    @table
-    |> :ets.tab2list()
-    |> Enum.sort_by(fn {ts, _} -> ts end, :desc)
-    |> Enum.take(limit)
-    |> Enum.map(fn {_ts, entry} -> entry end)
+    Repo.all(
+      from e in RequestEvent,
+        order_by: [desc: e.timestamp],
+        limit: ^limit
+    )
   end
 
   def summary do
-    entries = recent(@max_entries)
-    total = length(entries)
-    successes = Enum.filter(entries, &(&1.status == :ok))
+    total = Repo.aggregate(RequestEvent, :count, :id)
+
+    ok_events =
+      Repo.all(
+        from e in RequestEvent,
+          where: e.status == :ok,
+          select: %{
+            latency_ms: e.latency_ms,
+            prompt_tokens: e.prompt_tokens,
+            completion_tokens: e.completion_tokens
+          }
+      )
+
+    successful = length(ok_events)
 
     avg_latency =
-      case successes do
+      case ok_events do
         [] -> 0
-        list -> Enum.sum(Enum.map(list, & &1.latency_ms)) / length(list) |> round()
+        list -> (Enum.sum(Enum.map(list, & &1.latency_ms)) / successful) |> round()
       end
-
-    total_prompt_tokens = Enum.sum(Enum.map(successes, & &1.prompt_tokens))
-    total_completion_tokens = Enum.sum(Enum.map(successes, & &1.completion_tokens))
 
     %{
       total_requests: total,
-      successful: length(successes),
-      failed: total - length(successes),
+      successful: successful,
+      failed: total - successful,
       avg_latency_ms: avg_latency,
-      total_prompt_tokens: total_prompt_tokens,
-      total_completion_tokens: total_completion_tokens
+      total_prompt_tokens: Enum.sum(Enum.map(ok_events, & &1.prompt_tokens)),
+      total_completion_tokens: Enum.sum(Enum.map(ok_events, & &1.completion_tokens))
     }
   end
 
   def topic, do: @topic
-
-  # GenServer callbacks
-
-  @impl true
-  def init(_) do
-    :ets.new(@table, [:named_table, :ordered_set, :public, read_concurrency: true])
-    {:ok, %{}}
-  end
-
-  @impl true
-  def handle_cast({:record, entry}, state) do
-    ts = System.monotonic_time()
-    :ets.insert(@table, {ts, entry})
-    prune()
-    Phoenix.PubSub.broadcast(@pubsub, @topic, {:new_request, entry})
-    {:noreply, state}
-  end
-
-  defp prune do
-    size = :ets.info(@table, :size)
-
-    if size > @max_entries do
-      keys =
-        @table
-        |> :ets.tab2list()
-        |> Enum.sort_by(fn {ts, _} -> ts end)
-        |> Enum.take(size - @max_entries)
-        |> Enum.each(fn {ts, _} -> :ets.delete(@table, ts) end)
-
-      keys
-    end
-  end
 end

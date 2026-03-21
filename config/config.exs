@@ -8,7 +8,9 @@
 import Config
 
 config :ollama_wrapper,
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  ecto_repos: [OllamaWrapper.Repo],
+  ollama_base_url: "http://localhost:11434"
 
 # Configure the endpoint
 config :ollama_wrapper, OllamaWrapperWeb.Endpoint,

@@ -1,0 +1,34 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      PHX_SERVER: "true"
+      # Generate with: mix phx.gen.secret
+      SECRET_KEY_BASE: "REPLACE_WITH_OUTPUT_OF_mix_phx_gen_secret"
+      DATABASE_URL: "ecto://postgres:postgres@db/ollama_wrapper"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Needed on Linux; Docker Desktop (Mac/Windows) handles this automatically
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ollama_wrapper
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

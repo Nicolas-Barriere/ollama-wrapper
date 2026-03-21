@@ -8,10 +8,10 @@ defmodule OllamaWrapper.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      OllamaWrapper.Repo,
       OllamaWrapperWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:ollama_wrapper, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: OllamaWrapper.PubSub},
-      OllamaWrapper.RequestStore,
       OllamaWrapperWeb.Endpoint
     ]
 

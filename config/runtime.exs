@@ -22,6 +22,23 @@ end
 
 config :ollama_wrapper, OllamaWrapperWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+config :ollama_wrapper, :ollama_base_url,
+  System.get_env("OLLAMA_BASE_URL", "http://localhost:11434")
+
+if config_env() == :prod do
+  database_url =
+    System.get_env("DATABASE_URL") ||
+      raise """
+      environment variable DATABASE_URL is missing.
+      For example: ecto://postgres:postgres@localhost/ollama_wrapper
+      """
+
+  config :ollama_wrapper, OllamaWrapper.Repo,
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE", "10"))
+
+end
+
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

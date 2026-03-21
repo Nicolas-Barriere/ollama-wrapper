@@ -1,5 +1,14 @@
 import Config
 
+config :ollama_wrapper, OllamaWrapper.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  database: "ollama_wrapper_test",
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: 10
+
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :ollama_wrapper, OllamaWrapperWeb.Endpoint,

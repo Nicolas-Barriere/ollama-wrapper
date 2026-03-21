@@ -24,10 +24,23 @@ defmodule OllamaWrapperWeb.Layouts do
         .ok { color: #3fb950; }
         .error { color: #f85149; }
         .muted { color: #8b949e; }
+        tr.selected td { background: #1c2128; }
+        tr:hover td { background: #1c2128; }
+        .detail-panel { margin-top: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; }
+        .detail-panel h2 { color: #58a6ff; font-size: 1rem; margin-bottom: 20px; }
+        .detail-section { margin-bottom: 20px; }
+        .detail-label { color: #8b949e; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+        .detail-content { white-space: pre-wrap; word-break: break-word; font-family: monospace; font-size: 0.875rem; background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 12px; line-height: 1.6; }
       </style>
     </head>
     <body>
       {@inner_content}
+      <script src="/assets/phoenix.min.js"></script>
+      <script src="/assets/phoenix_live_view.min.js"></script>
+      <script>
+        let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {params: {_csrf_token: document.querySelector("meta[name='csrf-token']").getAttribute("content")}})
+        liveSocket.connect()
+      </script>
     </body>
     </html>
     """

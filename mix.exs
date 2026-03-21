@@ -47,7 +47,9 @@ defmodule OllamaWrapper.MixProject do
       {:bandit, "~> 1.5"},
       {:req, "~> 0.5"},
       {:phoenix_live_view, "~> 1.0"},
-      {:phoenix_html, "~> 4.2"}
+      {:phoenix_html, "~> 4.2"},
+      {:ecto_sql, "~> 3.10"},
+      {:postgrex, ">= 0.0.0"}
     ]
   end
 
@@ -59,7 +61,8 @@ defmodule OllamaWrapper.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get"],
+      setup: ["deps.get", "ecto.setup"],
+      "ecto.setup": ["ecto.create", "ecto.migrate"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end
