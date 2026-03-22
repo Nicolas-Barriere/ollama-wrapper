@@ -5,6 +5,24 @@ defmodule OllamaWrapperWeb.DashboardLive do
 
   @default_filters %{search: "", status: "", model: ""}
 
+  @granularities_for %{
+    "1h" => ["minute", "hour"],
+    "1d" => ["hour", "day"],
+    "1w" => ["hour", "day"],
+    "1m" => ["day", "week"],
+    "1y" => ["week", "month"],
+    "all" => ["day", "week", "month"]
+  }
+
+  @default_granularity %{
+    "1h" => "minute",
+    "1d" => "hour",
+    "1w" => "day",
+    "1m" => "day",
+    "1y" => "month",
+    "all" => "month"
+  }
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -12,6 +30,8 @@ defmodule OllamaWrapperWeb.DashboardLive do
     end
 
     filters = @default_filters
+    chart_range = "1d"
+    chart_granularity = "hour"
 
     {:ok,
      socket
@@ -19,7 +39,10 @@ defmodule OllamaWrapperWeb.DashboardLive do
      |> assign(:models, RequestStore.models())
      |> assign(:requests, RequestStore.recent(50, filters))
      |> assign(:summary, RequestStore.summary())
-     |> assign(:selected_id, nil)}
+     |> assign(:selected_id, nil)
+     |> assign(:chart_range, chart_range)
+     |> assign(:chart_granularity, chart_granularity)
+     |> assign(:chart_json, build_chart_json(chart_range, chart_granularity))}
   end
 
   @impl true
@@ -28,7 +51,11 @@ defmodule OllamaWrapperWeb.DashboardLive do
      socket
      |> assign(:models, RequestStore.models())
      |> assign(:requests, RequestStore.recent(50, socket.assigns.filters))
-     |> assign(:summary, RequestStore.summary())}
+     |> assign(:summary, RequestStore.summary())
+     |> assign(
+       :chart_json,
+       build_chart_json(socket.assigns.chart_range, socket.assigns.chart_granularity)
+     )}
   end
 
   @impl true
@@ -52,6 +79,66 @@ defmodule OllamaWrapperWeb.DashboardLive do
     selected_id = if socket.assigns.selected_id == id, do: nil, else: id
     {:noreply, assign(socket, :selected_id, selected_id)}
   end
+
+  @impl true
+  def handle_event("set_range", %{"range" => range}, socket) do
+    granularity = Map.get(@default_granularity, range, "hour")
+
+    {:noreply,
+     socket
+     |> assign(:chart_range, range)
+     |> assign(:chart_granularity, granularity)
+     |> assign(:chart_json, build_chart_json(range, granularity))}
+  end
+
+  @impl true
+  def handle_event("set_granularity", %{"granularity" => granularity}, socket) do
+    range = socket.assigns.chart_range
+
+    {:noreply,
+     socket
+     |> assign(:chart_granularity, granularity)
+     |> assign(:chart_json, build_chart_json(range, granularity))}
+  end
+
+  defp build_chart_json(range, granularity) do
+    series = RequestStore.time_series(range, granularity)
+
+    data = %{
+      labels: Enum.map(series, &format_bucket(&1.bucket, granularity)),
+      successful: Enum.map(series, & &1.successful),
+      failed: Enum.map(series, & &1.failed),
+      avg_tok_sec:
+        Enum.map(series, fn row ->
+          if row.avg_tok_sec, do: Float.round(row.avg_tok_sec, 1), else: nil
+        end)
+    }
+
+    Jason.encode!(data)
+  end
+
+  defp format_bucket(dt, "minute"), do: Calendar.strftime(dt, "%H:%M")
+  defp format_bucket(dt, "hour"), do: Calendar.strftime(dt, "%d %b %H:00")
+  defp format_bucket(dt, "day"), do: Calendar.strftime(dt, "%d %b")
+  defp format_bucket(dt, "week"), do: Calendar.strftime(dt, "%d %b")
+  defp format_bucket(dt, "month"), do: Calendar.strftime(dt, "%b %Y")
+
+  defp valid_granularities(range), do: Map.get(@granularities_for, range, ["hour"])
+
+  defp ranges, do: ["1h", "1d", "1w", "1m", "1y", "all"]
+
+  defp range_label("1h"), do: "1H"
+  defp range_label("1d"), do: "1D"
+  defp range_label("1w"), do: "1W"
+  defp range_label("1m"), do: "1M"
+  defp range_label("1y"), do: "1Y"
+  defp range_label("all"), do: "All"
+
+  defp gran_label("minute"), do: "Min"
+  defp gran_label("hour"), do: "Hour"
+  defp gran_label("day"), do: "Day"
+  defp gran_label("week"), do: "Week"
+  defp gran_label("month"), do: "Month"
 
   defp selected_request(requests, id) do
     Enum.find(requests, &(&1.id == id))
@@ -95,6 +182,38 @@ defmodule OllamaWrapperWeb.DashboardLive do
       <div class="stat">
         <div class="stat-label">Completion Tokens</div>
         <div class="stat-value">{@summary.total_completion_tokens}</div>
+      </div>
+    </div>
+
+    <div class="charts-section">
+      <div class="chart-controls">
+        <div class="btn-group">
+          <button
+            :for={r <- ranges()}
+            phx-click="set_range"
+            phx-value-range={r}
+            class={"btn #{if @chart_range == r, do: "btn-active"}"}
+          >{range_label(r)}</button>
+        </div>
+        <div class="btn-group">
+          <button
+            :for={g <- valid_granularities(@chart_range)}
+            phx-click="set_granularity"
+            phx-value-granularity={g}
+            class={"btn #{if @chart_granularity == g, do: "btn-active"}"}
+          >{gran_label(g)}</button>
+        </div>
+      </div>
+
+      <div id="charts-hook" phx-hook="Charts" data-chart={@chart_json} class="charts-grid">
+        <div class="chart-panel">
+          <div class="chart-title">Requests</div>
+          <canvas id="requests-canvas" phx-update="ignore"></canvas>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-title">Tokens / sec</div>
+          <canvas id="tok-sec-canvas" phx-update="ignore"></canvas>
+        </div>
       </div>
     </div>
 

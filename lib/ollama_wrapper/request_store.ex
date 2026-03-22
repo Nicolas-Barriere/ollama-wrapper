@@ -90,5 +90,52 @@ defmodule OllamaWrapper.RequestStore do
     }
   end
 
+  def time_series(range \\ "1d", granularity \\ "hour") do
+    since = range_to_since(range)
+    trunc = granularity_to_trunc(granularity)
+
+    # Use raw SQL with GROUP BY 1 positional reference to avoid Ecto's restriction
+    # on runtime fragment interpolation and PostgreSQL's duplicate-parameter issue.
+    # `trunc` is validated to a fixed safe set so interpolation is safe here.
+    {where_sql, params} =
+      if since do
+        {"WHERE timestamp >= $2", [trunc, since]}
+      else
+        {"", [trunc]}
+      end
+
+    sql = """
+    SELECT
+      date_trunc($1, timestamp) AS bucket,
+      count(*) AS total,
+      count(*) FILTER (WHERE status = 'ok') AS successful,
+      count(*) FILTER (WHERE status = 'error') AS failed,
+      avg(
+        CASE WHEN coalesce(thinking_duration_ms,0) + coalesce(output_duration_ms,0) > 0
+          THEN cast(completion_tokens AS float) / ((coalesce(thinking_duration_ms,0) + coalesce(output_duration_ms,0)) / 1000.0)
+        END
+      ) AS avg_tok_sec
+    FROM request_events
+    #{where_sql}
+    GROUP BY 1
+    ORDER BY 1
+    """
+
+    {:ok, %{rows: rows}} = Repo.query(sql, params)
+
+    Enum.map(rows, fn [bucket, total, successful, failed, avg_tok_sec] ->
+      %{bucket: bucket, total: total, successful: successful, failed: failed, avg_tok_sec: avg_tok_sec}
+    end)
+  end
+
+  defp range_to_since("all"), do: nil
+  defp range_to_since("1h"), do: DateTime.add(DateTime.utc_now(), -3600, :second)
+  defp range_to_since("1d"), do: DateTime.add(DateTime.utc_now(), -86400, :second)
+  defp range_to_since("1w"), do: DateTime.add(DateTime.utc_now(), -7 * 86400, :second)
+  defp range_to_since("1m"), do: DateTime.add(DateTime.utc_now(), -30 * 86400, :second)
+  defp range_to_since("1y"), do: DateTime.add(DateTime.utc_now(), -365 * 86400, :second)
+
+  defp granularity_to_trunc(g) when g in ["minute", "hour", "day", "week", "month"], do: g
+
   def topic, do: @topic
 end
