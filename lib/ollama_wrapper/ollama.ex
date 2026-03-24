@@ -1,15 +1,17 @@
 defmodule OllamaWrapper.Ollama do
   require Logger
 
-  @model "qwen3:8b"
+  @default_model "qwen3:8b"
 
   defp base_url do
     Application.get_env(:ollama_wrapper, :ollama_base_url, "http://localhost:11434")
   end
 
-  def chat(message, system \\ nil) do
+  def chat(message, system \\ nil, model \\ nil, on_chunk \\ nil, think \\ nil) do
+    model = model || @default_model
     messages = build_messages(message, system)
-    payload = %{model: @model, messages: messages, stream: true}
+    payload = %{model: model, messages: messages, stream: true}
+    payload = if is_boolean(think), do: Map.put(payload, :think, think), else: payload
     start_ms = now_ms()
 
     {:ok, state_pid} =
@@ -30,7 +32,13 @@ defmodule OllamaWrapper.Ollama do
         json: payload,
         receive_timeout: 120_000,
         into: fn {:data, chunk}, acc ->
-          Agent.update(state_pid, &process_chunk(chunk, &1, start_ms))
+          events =
+            Agent.get_and_update(state_pid, fn state ->
+              {new_state, events} = process_chunk(chunk, state, start_ms)
+              {events, new_state}
+            end)
+
+          if on_chunk, do: Enum.each(events, on_chunk)
           {:cont, acc}
         end
       )
@@ -40,16 +48,17 @@ defmodule OllamaWrapper.Ollama do
 
     case req_result do
       {:ok, _response} ->
-        build_success(result, message, system, start_ms)
+        build_success(result, message, system, model, start_ms, on_chunk)
 
       {:error, reason} ->
         error = "Could not reach Ollama: #{inspect(reason)}"
-        record_failure(message, system, now_ms() - start_ms, error)
+        if on_chunk, do: on_chunk.({:error, error})
+        record_failure(message, system, model, now_ms() - start_ms, error)
         {:error, error}
     end
   end
 
-  defp build_success(result, message, system, start_ms) do
+  defp build_success(result, message, system, model, start_ms, on_chunk) do
     total_ms = now_ms() - start_ms
     thinking_text = result.thinking |> Enum.reverse() |> IO.iodata_to_binary()
     content_text = result.content |> Enum.reverse() |> IO.iodata_to_binary()
@@ -68,16 +77,16 @@ defmodule OllamaWrapper.Ollama do
         thinking_duration_ms: thinking_duration_ms,
         output_duration_ms: output_duration_ms
       },
-      %{model: @model}
+      %{model: model}
     )
 
     Logger.info(
-      "[Ollama] #{total_ms}ms (think:#{thinking_duration_ms}ms out:#{output_duration_ms}ms) | in:#{result.prompt_tokens} out:#{result.completion_tokens} tokens | model:#{@model}"
+      "[Ollama] #{total_ms}ms (think:#{thinking_duration_ms}ms out:#{output_duration_ms}ms) | in:#{result.prompt_tokens} out:#{result.completion_tokens} tokens | model:#{model}"
     )
 
     OllamaWrapper.RequestStore.record(%{
       status: :ok,
-      model: @model,
+      model: model,
       latency_ms: total_ms,
       thinking_duration_ms: thinking_duration_ms,
       output_duration_ms: output_duration_ms,
@@ -91,78 +100,90 @@ defmodule OllamaWrapper.Ollama do
       response: content_text
     })
 
-    {:ok,
-     %{
-       response: content_text,
-       thinking: thinking_text,
-       model: @model,
-       prompt_tokens: result.prompt_tokens,
-       completion_tokens: result.completion_tokens,
-       latency_ms: total_ms,
-       thinking_duration_ms: thinking_duration_ms,
-       output_duration_ms: output_duration_ms
-     }}
+    stats = %{
+      done: true,
+      model: model,
+      prompt_tokens: result.prompt_tokens,
+      completion_tokens: result.completion_tokens,
+      latency_ms: total_ms,
+      thinking_duration_ms: thinking_duration_ms,
+      output_duration_ms: output_duration_ms
+    }
+
+    if on_chunk, do: on_chunk.({:done, stats})
+
+    {:ok, Map.merge(stats, %{response: content_text, thinking: thinking_text})}
   end
 
+  # Returns {new_state, [events]} where events are {:thinking, text} | {:content, text}
   defp process_chunk(chunk, state, start_ms) do
     chunk
     |> String.split("\n", trim: true)
-    |> Enum.reduce(state, &process_line(&1, &2, start_ms))
+    |> Enum.reduce({state, []}, fn line, {s, evts} ->
+      {new_s, new_evts} = process_line(line, s, start_ms)
+      {new_s, evts ++ new_evts}
+    end)
   end
 
   defp process_line(line, state, start_ms) do
     case Jason.decode(line) do
       {:ok, data} -> process_data(data, state, start_ms)
-      _ -> state
+      _ -> {state, []}
     end
   end
 
   defp process_data(%{"done" => true} = data, state, _start_ms) do
-    %{
+    new_state = %{
       state
       | prompt_tokens: Map.get(data, "prompt_eval_count", state.prompt_tokens),
         completion_tokens: Map.get(data, "eval_count", state.completion_tokens),
         prompt_eval_duration_ns: Map.get(data, "prompt_eval_duration", state.prompt_eval_duration_ns),
         load_duration_ns: Map.get(data, "load_duration", state.load_duration_ns)
     }
+
+    {new_state, []}
   end
 
   defp process_data(%{"message" => msg}, state, start_ms) do
     thinking_chunk = Map.get(msg, "thinking", "")
     content_chunk = Map.get(msg, "content", "")
 
-    state
-    |> append_thinking(thinking_chunk)
-    |> append_content(content_chunk, start_ms)
+    {state, evts1} = append_thinking(state, thinking_chunk)
+    {state, evts2} = append_content(state, content_chunk, start_ms)
+    {state, evts1 ++ evts2}
   end
 
-  defp process_data(_data, state, _start_ms), do: state
+  defp process_data(_data, state, _start_ms), do: {state, []}
 
-  defp append_thinking(state, ""), do: state
-  defp append_thinking(state, chunk), do: %{state | thinking: [chunk | state.thinking]}
+  defp append_thinking(state, ""), do: {state, []}
 
-  defp append_content(state, "", _start_ms), do: state
+  defp append_thinking(state, chunk) do
+    {%{state | thinking: [chunk | state.thinking]}, [{:thinking, chunk}]}
+  end
+
+  defp append_content(state, "", _start_ms), do: {state, []}
 
   defp append_content(%{thinking_end_ms: nil} = state, chunk, start_ms) do
-    %{state | content: [chunk | state.content], thinking_end_ms: now_ms() - start_ms}
+    new_state = %{state | content: [chunk | state.content], thinking_end_ms: now_ms() - start_ms}
+    {new_state, [{:content, chunk}]}
   end
 
   defp append_content(state, chunk, _start_ms) do
-    %{state | content: [chunk | state.content]}
+    {%{state | content: [chunk | state.content]}, [{:content, chunk}]}
   end
 
-  defp record_failure(message, system, latency_ms, error) do
+  defp record_failure(message, system, model, latency_ms, error) do
     :telemetry.execute(
       [:ollama_wrapper, :request, :failure],
       %{latency_ms: latency_ms},
-      %{model: @model, error: error}
+      %{model: model, error: error}
     )
 
     Logger.error("[Ollama] #{latency_ms}ms | error: #{error}")
 
     OllamaWrapper.RequestStore.record(%{
       status: :error,
-      model: @model,
+      model: model,
       latency_ms: latency_ms,
       thinking_duration_ms: 0,
       output_duration_ms: 0,
