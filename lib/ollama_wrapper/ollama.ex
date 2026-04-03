@@ -7,11 +7,27 @@ defmodule OllamaWrapper.Ollama do
     Application.get_env(:ollama_wrapper, :ollama_base_url, "http://localhost:11434")
   end
 
-  def chat(message, system \\ nil, model \\ nil, on_chunk \\ nil, think \\ nil) do
+  def chat(message, system \\ nil, model \\ nil, on_chunk \\ nil, think \\ nil, conversation_id \\ nil, tools \\ nil) do
     model = model || @default_model
-    messages = build_messages(message, system)
+    conv = OllamaWrapper.ConversationStore.get_or_create(conversation_id, system)
+    messages = OllamaWrapper.ConversationStore.history(conv.id) ++ [%{role: "user", content: message}]
+
+    do_request(messages, model, on_chunk, think, tools, conv.id, message, system)
+  end
+
+  def continue_after_tools(conversation_id, tool_results, model \\ nil, on_chunk \\ nil, think \\ nil, tools \\ nil) do
+    model = model || @default_model
+
+    OllamaWrapper.ConversationStore.save_tool_results(conversation_id, tool_results)
+    messages = OllamaWrapper.ConversationStore.history(conversation_id)
+
+    do_request(messages, model, on_chunk, think, tools, conversation_id, nil, nil)
+  end
+
+  defp do_request(messages, model, on_chunk, think, tools, conversation_id, user_message, system) do
     payload = %{model: model, messages: messages, stream: true}
     payload = if is_boolean(think), do: Map.put(payload, :think, think), else: payload
+    payload = if tools, do: Map.put(payload, :tools, tools), else: payload
     start_ms = now_ms()
 
     {:ok, state_pid} =
@@ -19,6 +35,7 @@ defmodule OllamaWrapper.Ollama do
         %{
           thinking: [],
           content: [],
+          tool_calls: [],
           thinking_end_ms: nil,
           prompt_tokens: 0,
           completion_tokens: 0,
@@ -48,20 +65,21 @@ defmodule OllamaWrapper.Ollama do
 
     case req_result do
       {:ok, _response} ->
-        build_success(result, message, system, model, start_ms, on_chunk)
+        build_success(result, user_message, system, model, conversation_id, start_ms, on_chunk)
 
       {:error, reason} ->
         error = "Could not reach Ollama: #{inspect(reason)}"
         if on_chunk, do: on_chunk.({:error, error})
-        record_failure(message, system, model, now_ms() - start_ms, error)
+        record_failure(user_message, system, model, now_ms() - start_ms, error)
         {:error, error}
     end
   end
 
-  defp build_success(result, message, system, model, start_ms, on_chunk) do
+  defp build_success(result, message, system, model, conversation_id, start_ms, on_chunk) do
     total_ms = now_ms() - start_ms
     thinking_text = result.thinking |> Enum.reverse() |> IO.iodata_to_binary()
     content_text = result.content |> Enum.reverse() |> IO.iodata_to_binary()
+    tool_calls = result.tool_calls
 
     thinking_end_ms = result.thinking_end_ms || total_ms
     thinking_duration_ms = thinking_end_ms
@@ -84,6 +102,19 @@ defmodule OllamaWrapper.Ollama do
       "[Ollama] #{total_ms}ms (think:#{thinking_duration_ms}ms out:#{output_duration_ms}ms) | in:#{result.prompt_tokens} out:#{result.completion_tokens} tokens | model:#{model}"
     )
 
+    # Save to conversation based on response type
+    if tool_calls != [] do
+      if message, do: save_user_message(conversation_id, message)
+      OllamaWrapper.ConversationStore.save_assistant_tool_calls(conversation_id, tool_calls)
+    else
+      if message do
+        OllamaWrapper.ConversationStore.save_turn(conversation_id, message, content_text)
+      else
+        # Continuing after tool results — save just the assistant response
+        save_assistant_message(conversation_id, content_text)
+      end
+    end
+
     OllamaWrapper.RequestStore.record(%{
       status: :ok,
       model: model,
@@ -102,6 +133,7 @@ defmodule OllamaWrapper.Ollama do
 
     stats = %{
       done: true,
+      conversation_id: conversation_id,
       model: model,
       prompt_tokens: result.prompt_tokens,
       completion_tokens: result.completion_tokens,
@@ -110,12 +142,39 @@ defmodule OllamaWrapper.Ollama do
       output_duration_ms: output_duration_ms
     }
 
+    stats = if tool_calls != [], do: Map.put(stats, :tool_calls, format_tool_calls(tool_calls)), else: stats
+
     if on_chunk, do: on_chunk.({:done, stats})
 
-    {:ok, Map.merge(stats, %{response: content_text, thinking: thinking_text})}
+    response = Map.merge(stats, %{response: content_text, thinking: thinking_text})
+    response = if tool_calls != [], do: Map.put(response, :tool_calls, format_tool_calls(tool_calls)), else: response
+    {:ok, response}
   end
 
-  # Returns {new_state, [events]} where events are {:thinking, text} | {:content, text}
+  defp save_user_message(conversation_id, message) do
+    OllamaWrapper.Repo.insert!(%OllamaWrapper.ConversationMessage{
+      conversation_id: conversation_id,
+      role: "user",
+      content: message
+    })
+  end
+
+  defp save_assistant_message(conversation_id, content) do
+    OllamaWrapper.Repo.insert!(%OllamaWrapper.ConversationMessage{
+      conversation_id: conversation_id,
+      role: "assistant",
+      content: content
+    })
+  end
+
+  defp format_tool_calls(tool_calls) do
+    Enum.map(tool_calls, fn tc ->
+      func = tc["function"]
+      %{name: func["name"], arguments: func["arguments"]}
+    end)
+  end
+
+  # Returns {new_state, [events]} where events are {:thinking, text} | {:content, text} | {:tool_call, map}
   defp process_chunk(chunk, state, start_ms) do
     chunk
     |> String.split("\n", trim: true)
@@ -147,10 +206,12 @@ defmodule OllamaWrapper.Ollama do
   defp process_data(%{"message" => msg}, state, start_ms) do
     thinking_chunk = Map.get(msg, "thinking", "")
     content_chunk = Map.get(msg, "content", "")
+    tool_calls = Map.get(msg, "tool_calls")
 
     {state, evts1} = append_thinking(state, thinking_chunk)
     {state, evts2} = append_content(state, content_chunk, start_ms)
-    {state, evts1 ++ evts2}
+    {state, evts3} = if tool_calls, do: append_tool_calls(state, tool_calls), else: {state, []}
+    {state, evts1 ++ evts2 ++ evts3}
   end
 
   defp process_data(_data, state, _start_ms), do: {state, []}
@@ -170,6 +231,16 @@ defmodule OllamaWrapper.Ollama do
 
   defp append_content(state, chunk, _start_ms) do
     {%{state | content: [chunk | state.content]}, [{:content, chunk}]}
+  end
+
+  defp append_tool_calls(state, tool_calls) do
+    events =
+      Enum.map(tool_calls, fn tc ->
+        func = tc["function"]
+        {:tool_call, %{name: func["name"], arguments: func["arguments"]}}
+      end)
+
+    {%{state | tool_calls: state.tool_calls ++ tool_calls}, events}
   end
 
   defp record_failure(message, system, model, latency_ms, error) do
@@ -195,12 +266,6 @@ defmodule OllamaWrapper.Ollama do
       system_prompt: system,
       error: error
     })
-  end
-
-  defp build_messages(message, nil), do: [%{role: "user", content: message}]
-
-  defp build_messages(message, system) do
-    [%{role: "system", content: system}, %{role: "user", content: message}]
   end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
